@@ -11,6 +11,14 @@ import android.os.IBinder
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import com.adverse.adverseplayer.R
+import com.adverse.adverseplayer.network.AdverseApiClient
+import com.adverse.adverseplayer.network.PlaybackLogEntry
+import com.adverse.adverseplayer.network.TimeSlotDto
+import com.adverse.adverseplayer.network.UnauthorizedException
+import com.adverse.adverseplayer.storage.AppDatabase
+import com.adverse.adverseplayer.storage.CachedPlaylistItem
+import com.adverse.adverseplayer.storage.MediaCache
+import com.adverse.adverseplayer.storage.PlaybackLogQueueItem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,6 +28,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.Instant
+import com.adverse.adverseplayer.network.HeartbeatRequest
+import com.adverse.adverseplayer.network.ScheduleResult
+import com.adverse.adverseplayer.storage.SecurePrefs
 
 /* What the UI(pairing-code vs. player screen) reacts to */
 sealed class DeviceState {
@@ -33,7 +44,7 @@ sealed class DeviceState {
 class SyncService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private lateinit var prefs: SecurePreferences
+    private lateinit var prefs: SecurePrefs
     private lateinit var db: AppDatabase
     private lateinit var mediaCache: MediaCache
     private val api = AdverseApiClient()
@@ -78,7 +89,7 @@ class SyncService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        prefs = SecurePreferences(this)
+        prefs = SecurePrefs(this)
         db = AppDatabase.getInstance(this)
         mediaCache = MediaCache(this)
         createNotificationChannel()
@@ -88,9 +99,9 @@ class SyncService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private suspend fun runForever() {
+    private suspend fun CoroutineScope.runForever() {
         var heartbeatCount = 0L
-        while (scope.isActive) {
+        while (isActive) {
             try {
                 if (!prefs.isPaired) {
                     runUnpairedFlow()
@@ -99,12 +110,10 @@ class SyncService : Service() {
                     heartbeatCount++
                 }
             } catch (e: UnauthorizedException) {
-                // Server rejected the token — admin disabled or rotated it.
                 prefs.clearPairing()
                 state.value = DeviceState.Unpaired
             } catch (e: Exception) {
-                // Network hiccup or similar — never crash the loop. Cached
-                // content keeps playing regardless; we just retry next cycle.
+                // Network hiccup or similar — never crash the loop.
             }
             delay(if (prefs.isPaired) HEARTBEAT_INTERVAL_MS else PAIRING_POLL_INTERVAL_MS)
         }
@@ -112,6 +121,8 @@ class SyncService : Service() {
 
     /** Register (idempotent) then poll pairing-status until the admin pairs
      *  it from the dashboard and the server hands back a token. */
+    @Suppress("HardwareIds") // ANDROID_ID identifies this physical player box for
+    // pairing with the backend — not used for user tracking.
     private suspend fun runUnpairedFlow() {
         val deviceUid = prefs.deviceUid ?: Settings.Secure.getString(
             contentResolver, Settings.Secure.ANDROID_ID
@@ -172,7 +183,6 @@ class SyncService : Service() {
 
         for (slot in slots) {
             if (!slot.is_active) continue
-
             val existing = dao.findById(slot.id)
             // Diff on content_hash, not media_url — the server marks a re-uploaded
             // replacement as a new hash even if the URL happened to stay the same,
@@ -219,7 +229,6 @@ class SyncService : Service() {
                 time_slot_id = it.timeSlotId
             )
         }
-
         api.playbackBulk(token, payload).onSuccess {
             db.playbackLogDao().markSynced(batch.map { it.localId })
             db.playbackLogDao().pruneSyncedOverflow()

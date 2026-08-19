@@ -1,5 +1,6 @@
 package com.adverse.adverseplayer.ui
 
+import android.content.Context
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -22,6 +23,8 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import com.adverse.adverseplayer.storage.CachedPlaylistItem
+import com.adverse.adverseplayer.sync.SyncService
 
 private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp")
 
@@ -37,31 +40,31 @@ private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp")
  *  - Image: has no natural length, so setImageDurationMs is what makes
  *    ExoPlayer advance to the next item at all
  */
+@androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(UnstableApi::class)
 @Composable
-fun PlayerScreen(items: List<CachedPlaylistItem>) {
+fun PlayerScreen(items: List<CachedPlaylistItem>, context: Context) {
     if (items.isEmpty()) {
-        Box(
-            modifier = Modifier.fillMaxWidth().background(Color.Black),
-            contentAlignment = Alignment.Center
-        ) {
-            // TODO: show AdVerse logo and info instead of plain text
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
             Text("No active content scheduled", color = Color.DarkGray)
         }
         return
     }
 
-    val context = LocalContext.current
+    val localContext = LocalContext.current
     var currentIndex by remember(items) { mutableIntStateOf(0) }
 
     val exoPlayer = remember(items) {
-        ExoPlayer.Builder(context).build().apply {
+        ExoPlayer.Builder(localContext).build().apply {
             items.forEach { item ->
-                addMediaItem(buildMediaItem(item.localPath, item.durationSeconds))
+                item.localPath?.let { path ->
+                    addMediaItem(buildMediaItem(path, item.durationSeconds))
+                }
             }
             repeatMode = Player.REPEAT_MODE_ALL
             prepare()
             play()
+
             addListener(object : Player.Listener {
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     // A transition means the previous item hit its assigned
@@ -92,11 +95,13 @@ fun PlayerScreen(items: List<CachedPlaylistItem>) {
     )
 }
 
+@androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(UnstableApi::class)
 private fun buildMediaItem(localPath: String, durationSeconds: Int): MediaItem {
     val uri = Uri.fromFile(java.io.File(localPath))
     val ext = localPath.substringAfterLast('.', "").lowercase()
     val durationMs = durationSeconds.toLong() * 1000L
+
     val builder = MediaItem.Builder().setUri(uri)
 
     return if (ext in IMAGE_EXTENSIONS) {

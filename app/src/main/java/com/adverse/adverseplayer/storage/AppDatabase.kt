@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.room.*
 
 /** One row per TimeSlot the device currently knows about. `localPath` is
- *  null until the file has actually finished downloading and been verified. */
+a *  null until the file has actually finished downloading and been verified. */
 @Entity(tableName = "cached_playlist_item")
 data class CachedPlaylistItem(
     @PrimaryKey val timeSlotId: String,
