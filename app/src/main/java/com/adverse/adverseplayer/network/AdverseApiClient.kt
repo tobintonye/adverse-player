@@ -25,7 +25,7 @@ import kotlinx.serialization.json.Json
  * building a release APK — during development this can be an ngrok URL.
  */
 object ApiConfig {
-    const val BASE_URL = "https://https://branchlike-nonaltruistically-toya.ngrok-free.dev/adverse-api/players/"
+    const val BASE_URL = "https://branchlike-nonaltruistically-toya.ngrok-free.dev/adverse-api/players/"
 }
 
 sealed class ScheduleResult {
@@ -82,7 +82,7 @@ class AdverseApiClient {
 
     /** Sends If-Modified-Since when we have one; returns NotModified on a 304. */
     suspend fun schedule(token: String, lastModified: String?): ScheduleResult = try {
-        val response = client.get("${ApiConfig.BASE_URL}players/schedule/") {
+        val response = client.get("${ApiConfig.BASE_URL}schedule/") {
             deviceAuth(token)
             lastModified?.let { header("If-Modified-Since", it) }
         }
@@ -104,7 +104,7 @@ class AdverseApiClient {
     /** Max 500 entries per call per the server's bulk endpoint. */
     suspend fun playbackBulk(token: String, logs: List<PlaybackLogEntry>): Result<Unit> = runCatching {
         require(logs.size <= 500) { "playbackBulk accepts at most 500 logs per call" }
-        val response = client.post("${ApiConfig.BASE_URL}players/playback/bulk/") {
+        val response = client.post("${ApiConfig.BASE_URL}playback/bulk/") {
             deviceAuth(token)
             contentType(ContentType.Application.Json)
             setBody(PlaybackBulkRequest(logs))

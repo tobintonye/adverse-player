@@ -1,6 +1,7 @@
 package com.adverse.adverseplayer.storage
 
 import android.content.Context
+import android.util.Log
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.request.get
@@ -51,6 +52,13 @@ class MediaCache(private val context: Context) {
             if (target.exists()) target.delete()
             tmp.renameTo(target)
             target
+        }.onSuccess { file ->
+            Log.d("MediaCache", "download succeeded: hash=$contentHash size=${file.length()} bytes -> ${file.absolutePath}")
+        }.onFailure { e ->
+            // This used to fail silently — a failed download just left
+            // localPath null and the item quietly never appeared in
+            // getPlayable(), with zero trace of why. Log it loudly instead.
+            Log.e("MediaCache", "download FAILED for hash=$contentHash url=$mediaUrl", e)
         }
     }
 
@@ -61,4 +69,3 @@ class MediaCache(private val context: Context) {
         }
     }
 }
-

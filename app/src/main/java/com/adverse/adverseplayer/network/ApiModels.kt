@@ -1,11 +1,13 @@
 package com.adverse.adverseplayer.network
 
+import android.annotation.SuppressLint
 import kotlinx.serialization.Serializable
 
 // POST /players/register/
+@SuppressLint("UnsafeOptInUsageError")
 @Serializable
 data class RegisterRequest(val device_uid: String)
-
+@SuppressLint("UnsafeOptInUsageError")
 @Serializable
 data class RegisterResponse(
     val device_uid: String,
@@ -15,6 +17,7 @@ data class RegisterResponse(
 )
 
 // GET /players/pairing-status/?device_uid=...
+@SuppressLint("UnsafeOptInUsageError")
 @Serializable
 data class PairingStatusResponse(
     val is_paired: Boolean,
@@ -26,6 +29,7 @@ data class PairingStatusResponse(
 )
 
 // POST /players/heartbeat/  (all fields optional per the server serializer)
+@SuppressLint("UnsafeOptInUsageError")
 @Serializable
 data class HeartbeatRequest(
     val firmware_version: String? = null,
@@ -34,10 +38,12 @@ data class HeartbeatRequest(
 )
 
 // GET /players/players/schedule/
+@SuppressLint("UnsafeOptInUsageError")
 @Serializable
 data class TimeSlotDto(
     val id: String,
     val date: String,
+    val scheduled_time: String,
     val play_order: Int,
     val duration_seconds: Int,
     val campaign_name: String,
@@ -48,6 +54,7 @@ data class TimeSlotDto(
     val content_hash: String
 )
 
+@SuppressLint("UnsafeOptInUsageError")
 @Serializable
 data class ScheduleResponse(
     val device_uid: String,
@@ -57,6 +64,7 @@ data class ScheduleResponse(
 )
 
 // POST /players/players/playback/bulk/  — max 500 logs per call
+@SuppressLint("UnsafeOptInUsageError")
 @Serializable
 data class PlaybackLogEntry(
     val media_id: String,
@@ -66,5 +74,6 @@ data class PlaybackLogEntry(
     val time_slot_id: String? = null
 )
 
+@SuppressLint("UnsafeOptInUsageError")
 @Serializable
 data class PlaybackBulkRequest(val logs: List<PlaybackLogEntry>)

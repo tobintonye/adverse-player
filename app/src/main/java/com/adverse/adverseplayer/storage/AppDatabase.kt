@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.room.*
 
 /** One row per TimeSlot the device currently knows about. `localPath` is
-a *  null until the file has actually finished downloading and been verified. */
+ *  null until the file has actually finished downloading and been verified. */
 @Entity(tableName = "cached_playlist_item")
 data class CachedPlaylistItem(
     @PrimaryKey val timeSlotId: String,
@@ -15,6 +15,7 @@ data class CachedPlaylistItem(
     val campaignName: String,
     val advertiser: String,
     val playOrder: Int,
+    val scheduledSecondsOfDay: Int, // seconds since midnight — what actually drives playback timing now
     val durationSeconds: Int,
     val localPath: String?,
     val downloadedAt: Long?
@@ -35,10 +36,10 @@ data class PlaybackLogQueueItem(
 
 @Dao
 interface PlaylistDao {
-    @Query("SELECT * FROM cached_playlist_item ORDER BY playOrder ASC")
+    @Query("SELECT * FROM cached_playlist_item ORDER BY scheduledSecondsOfDay ASC")
     suspend fun getAll(): List<CachedPlaylistItem>
 
-    @Query("SELECT * FROM cached_playlist_item WHERE localPath IS NOT NULL ORDER BY playOrder ASC")
+    @Query("SELECT * FROM cached_playlist_item WHERE localPath IS NOT NULL ORDER BY scheduledSecondsOfDay ASC")
     suspend fun getPlayable(): List<CachedPlaylistItem>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -70,7 +71,7 @@ interface PlaybackLogDao {
 
 @Database(
     entities = [CachedPlaylistItem::class, PlaybackLogQueueItem::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -86,7 +87,10 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "adverse_player.db"
-                ).build().also { instance = it }
+                )
+                    .fallbackToDestructiveMigration()
+                    .build()
+                    .also { instance = it }
             }
     }
 }

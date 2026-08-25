@@ -10,6 +10,7 @@
     <!-- Needed once the box is in device-owner mode, for remote reboot -->
     <uses-permission android:name="android.permission.REBOOT" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="false"

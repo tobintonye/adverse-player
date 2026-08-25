@@ -9,6 +9,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
+import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import com.adverse.adverseplayer.R
 import com.adverse.adverseplayer.network.AdverseApiClient
@@ -31,6 +32,7 @@ import java.time.Instant
 import com.adverse.adverseplayer.network.HeartbeatRequest
 import com.adverse.adverseplayer.network.ScheduleResult
 import com.adverse.adverseplayer.storage.SecurePrefs
+import kotlinx.coroutines.currentCoroutineContext
 
 /* What the UI(pairing-code vs. player screen) reacts to */
 sealed class DeviceState {
@@ -45,8 +47,42 @@ class SyncService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var prefs: SecurePrefs
+    /** Register (idempotent) then poll pairing-status until the admin pairs
+     *  it from the dashboard and the server hands back a token. */
+    private suspend fun runUnpairedFlow() {
+        val deviceUid = prefs.deviceUid ?: Settings.Secure.getString(
+            contentResolver, Settings.Secure.ANDROID_ID
+        ).also { prefs.deviceUid = it }
+
+        if (prefs.pairingCode == null) {
+            api.register(deviceUid)
+                .onSuccess { reg ->
+                    prefs.pairingCode = reg.pairing_code
+                    state.value = DeviceState.ShowPairingCode(reg.pairing_code)
+                }
+                .onFailure { e ->
+                    android.util.Log.e("SyncService", "register failed: ${e.message}", e)
+                }
+            return
+        }
+
+        state.value = DeviceState.ShowPairingCode(prefs.pairingCode!!)
+
+        api.pairingStatus(deviceUid)
+            .onSuccess { status ->
+                if (status.is_paired && status.auth_token != null) {
+                    prefs.authToken = status.auth_token
+                    updateNotification("Paired. Syncing schedule…")
+                }
+            }
+            .onFailure { e ->
+                android.util.Log.e("SyncService", "pairingStatus failed: ${e.message}", e)
+            }
+    }
+
     private lateinit var db: AppDatabase
     private lateinit var mediaCache: MediaCache
+
     private val api = AdverseApiClient()
 
     companion object {
@@ -54,6 +90,7 @@ class SyncService : Service() {
         private const val NOTIF_ID = 1
         private const val HEARTBEAT_INTERVAL_MS = 30_000L
         private const val SCHEDULE_PULL_EVERY_N_HEARTBEATS = 10L // ~5 min at 30s cadence
+
         private const val PAIRING_POLL_INTERVAL_MS = 10_000L
 
         val state: MutableStateFlow<DeviceState> = MutableStateFlow(DeviceState.Unpaired)
@@ -66,12 +103,12 @@ class SyncService : Service() {
                 context.startService(intent)
             }
         }
-
         /**
          * Called from the player UI (not bound to this service — it's simpler
          * to just write straight to Room) whenever a piece of content finishes
          * playing, to queue proof-of-play for the next sync cycle to flush.
          */
+        @RequiresApi(Build.VERSION_CODES.O)
         fun logPlayback(context: Context, item: CachedPlaylistItem, completed: Boolean) {
             CoroutineScope(Dispatchers.IO).launch {
                 AppDatabase.getInstance(context).playbackLogDao().enqueue(
@@ -99,9 +136,9 @@ class SyncService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private suspend fun CoroutineScope.runForever() {
+    private suspend fun runForever() {
         var heartbeatCount = 0L
-        while (isActive) {
+        while (currentCoroutineContext().isActive) {
             try {
                 if (!prefs.isPaired) {
                     runUnpairedFlow()
@@ -110,39 +147,15 @@ class SyncService : Service() {
                     heartbeatCount++
                 }
             } catch (e: UnauthorizedException) {
+                // Server rejected the token — admin disabled or rotated it.
                 prefs.clearPairing()
                 state.value = DeviceState.Unpaired
             } catch (e: Exception) {
-                // Network hiccup or similar — never crash the loop.
+                // Network hiccup or similar — never crash the loop. Cached
+                // content keeps playing regardless; we just retry next cycle.
+                android.util.Log.e("SyncService", "cycle error: ${e.message}", e)
             }
             delay(if (prefs.isPaired) HEARTBEAT_INTERVAL_MS else PAIRING_POLL_INTERVAL_MS)
-        }
-    }
-
-    /** Register (idempotent) then poll pairing-status until the admin pairs
-     *  it from the dashboard and the server hands back a token. */
-    @Suppress("HardwareIds") // ANDROID_ID identifies this physical player box for
-    // pairing with the backend — not used for user tracking.
-    private suspend fun runUnpairedFlow() {
-        val deviceUid = prefs.deviceUid ?: Settings.Secure.getString(
-            contentResolver, Settings.Secure.ANDROID_ID
-        ).also { prefs.deviceUid = it }
-
-        if (prefs.pairingCode == null) {
-            api.register(deviceUid).onSuccess { reg ->
-                prefs.pairingCode = reg.pairing_code
-                state.value = DeviceState.ShowPairingCode(reg.pairing_code)
-            }
-            return
-        }
-
-        state.value = DeviceState.ShowPairingCode(prefs.pairingCode!!)
-
-        api.pairingStatus(deviceUid).onSuccess { status ->
-            if (status.is_paired && status.auth_token != null) {
-                prefs.authToken = status.auth_token
-                updateNotification("Paired. Syncing schedule…")
-            }
         }
     }
 
@@ -167,12 +180,27 @@ class SyncService : Service() {
 
     private suspend fun pullSchedule(token: String) {
         when (val result = api.schedule(token, prefs.scheduleLastModified)) {
-            is ScheduleResult.NotModified -> Unit // nothing changed, cache stands
-            is ScheduleResult.Error -> Unit         // stay on cached playlist
+            is ScheduleResult.NotModified -> {
+                android.util.Log.d("SyncService", "schedule: 304 not modified, using cache")
+            }
+            is ScheduleResult.Error -> {
+                android.util.Log.e("SyncService", "schedule: request failed — ${result.message}")
+            }
             is ScheduleResult.Updated -> {
+                android.util.Log.d("SyncService", "schedule: got ${result.schedule.schedule.size} slot(s)")
                 prefs.scheduleLastModified = result.lastModified
                 syncPlaylistToCache(result.schedule.schedule)
             }
+        }
+    }
+
+    private fun parseSecondsOfDay(hhmmss: String): Int {
+        // DRF's default TimeField JSON format: "HH:MM:SS" (or "HH:MM:SS.ffffff")
+        return try {
+            val parts = hhmmss.substringBefore('.').split(":")
+            parts[0].toInt() * 3600 + parts[1].toInt() * 60 + parts[2].toInt()
+        } catch (e: Exception) {
+            0 // malformed time — falls back to midnight rather than crashing the sync cycle
         }
     }
 
@@ -205,6 +233,7 @@ class SyncService : Service() {
                     campaignName = slot.campaign_name,
                     advertiser = slot.advertiser,
                     playOrder = slot.play_order,
+                    scheduledSecondsOfDay = parseSecondsOfDay(slot.scheduled_time),
                     durationSeconds = slot.duration_seconds,
                     localPath = localPath,
                     downloadedAt = if (localPath != null) System.currentTimeMillis() else null
