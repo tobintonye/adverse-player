@@ -43,10 +43,11 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
                     val state by SyncService.state.collectAsStateWithLifecycle()
+                    val audioEnabled by SyncService.audioEnabled.collectAsStateWithLifecycle()
                     when (val s = state) {
                         is DeviceState.Unpaired -> LoadingScreen()
                         is DeviceState.ShowPairingCode -> PairingCodeScreen(s.code)
-                        is DeviceState.Playing -> PlayerScreen(items = s.items, context = this@MainActivity)
+                        is DeviceState.Playing -> PlayerScreen(items = s.items, context = this@MainActivity, audioEnabled = audioEnabled)
                     }
                 }
             }

@@ -3,8 +3,9 @@ package com.adverse.adverseplayer.storage
 import android.content.Context
 import androidx.room.*
 
-/** One row per TimeSlot the device currently knows about. `localPath` is
- *  null until the file has actually finished downloading and been verified. */
+/** One row per rotation position (TimeSlot) the device currently knows
+ *  about. `localPath` is null until the file has actually finished
+ *  downloading and been verified. */
 @Entity(tableName = "cached_playlist_item")
 data class CachedPlaylistItem(
     @PrimaryKey val timeSlotId: String,
@@ -14,8 +15,9 @@ data class CachedPlaylistItem(
     val mediaTitle: String,
     val campaignName: String,
     val advertiser: String,
-    val playOrder: Int,
-    val scheduledSecondsOfDay: Int, // seconds since midnight — what actually drives playback timing now
+    val playOrder: Int, // this item's position in the rotation loop — the real ordering field now
+    val dailyStartSeconds: Int, // seconds since midnight — start of this campaign's daypart
+    val dailyEndSeconds: Int,   // seconds since midnight — end of this campaign's daypart
     val durationSeconds: Int,
     val localPath: String?,
     val downloadedAt: Long?
@@ -36,10 +38,10 @@ data class PlaybackLogQueueItem(
 
 @Dao
 interface PlaylistDao {
-    @Query("SELECT * FROM cached_playlist_item ORDER BY scheduledSecondsOfDay ASC")
+    @Query("SELECT * FROM cached_playlist_item ORDER BY playOrder ASC")
     suspend fun getAll(): List<CachedPlaylistItem>
 
-    @Query("SELECT * FROM cached_playlist_item WHERE localPath IS NOT NULL ORDER BY scheduledSecondsOfDay ASC")
+    @Query("SELECT * FROM cached_playlist_item WHERE localPath IS NOT NULL ORDER BY playOrder ASC")
     suspend fun getPlayable(): List<CachedPlaylistItem>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -71,7 +73,7 @@ interface PlaybackLogDao {
 
 @Database(
     entities = [CachedPlaylistItem::class, PlaybackLogQueueItem::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

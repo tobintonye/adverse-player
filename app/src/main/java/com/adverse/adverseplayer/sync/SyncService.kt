@@ -74,6 +74,10 @@ class SyncService : Service() {
                     prefs.authToken = status.auth_token
                     updateNotification("Paired. Syncing schedule…")
                 }
+                status.billboard?.let {
+                    prefs.audioEnabled = it.audio_enabled
+                    audioEnabled.value = it.audio_enabled
+                }
             }
             .onFailure { e ->
                 android.util.Log.e("SyncService", "pairingStatus failed: ${e.message}", e)
@@ -94,6 +98,10 @@ class SyncService : Service() {
         private const val PAIRING_POLL_INTERVAL_MS = 10_000L
 
         val state: MutableStateFlow<DeviceState> = MutableStateFlow(DeviceState.Unpaired)
+        // Separate from DeviceState so a volume change is reflected
+        // immediately, without waiting for the schedule/playlist to also
+        // change — those are unrelated events.
+        val audioEnabled: MutableStateFlow<Boolean> = MutableStateFlow(false)
 
         fun start(context: Context) {
             val intent = Intent(context, SyncService::class.java)
@@ -129,6 +137,7 @@ class SyncService : Service() {
         prefs = SecurePrefs(this)
         db = AppDatabase.getInstance(this)
         mediaCache = MediaCache(this)
+        audioEnabled.value = prefs.audioEnabled
         createNotificationChannel()
         startForeground(NOTIF_ID, buildNotification("Starting…"))
         scope.launch { runForever() }
@@ -165,7 +174,10 @@ class SyncService : Service() {
         api.heartbeat(
             token,
             HeartbeatRequest(free_storage_mb = availableStorageMb())
-        )
+        ).onSuccess { response ->
+            prefs.audioEnabled = response.audio_enabled
+            audioEnabled.value = response.audio_enabled
+        }
 
         if (heartbeatCount % SCHEDULE_PULL_EVERY_N_HEARTBEATS == 0L) {
             pullSchedule(token)
@@ -233,7 +245,8 @@ class SyncService : Service() {
                     campaignName = slot.campaign_name,
                     advertiser = slot.advertiser,
                     playOrder = slot.play_order,
-                    scheduledSecondsOfDay = parseSecondsOfDay(slot.scheduled_time),
+                    dailyStartSeconds = parseSecondsOfDay(slot.daily_start_time),
+                    dailyEndSeconds = parseSecondsOfDay(slot.daily_end_time),
                     durationSeconds = slot.duration_seconds,
                     localPath = localPath,
                     downloadedAt = if (localPath != null) System.currentTimeMillis() else null

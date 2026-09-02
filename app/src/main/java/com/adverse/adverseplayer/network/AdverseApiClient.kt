@@ -67,7 +67,7 @@ class AdverseApiClient {
         response.body()
     }
 
-    suspend fun heartbeat(token: String, body: HeartbeatRequest): Result<Unit> = runCatching {
+    suspend fun heartbeat(token: String, body: HeartbeatRequest): Result<HeartbeatResponse> = runCatching {
         val response = client.post("${ApiConfig.BASE_URL}heartbeat/") {
             deviceAuth(token)
             contentType(ContentType.Application.Json)
@@ -76,7 +76,7 @@ class AdverseApiClient {
         when {
             response.status.value == 401 -> throw UnauthorizedException()
             !response.status.isSuccess() -> error("heartbeat failed: ${response.status}")
-            else -> Unit
+            else -> response.body()
         }
     }
 

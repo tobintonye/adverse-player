@@ -43,6 +43,15 @@ class SecurePrefs(context: Context) {
         get() = prefs.getString(KEY_SCHEDULE_LAST_MODIFIED, null)
         set(value) = prefs.edit { putString(KEY_SCHEDULE_LAST_MODIFIED, value) }
 
+    /** Whether THIS billboard's venue wants audio. Defaults false (muted) —
+     *  correct for outdoor/highway installs, which is the common case.
+     *  Refreshed from both pairing-status and every heartbeat response, so
+     *  a venue changing this setting takes effect within one heartbeat
+     *  cycle without needing a re-pair. */
+    var audioEnabled: Boolean
+        get() = prefs.getBoolean(KEY_AUDIO_ENABLED, false)
+        set(value) = prefs.edit { putBoolean(KEY_AUDIO_ENABLED, value) }
+
     val isPaired: Boolean
         get() = !authToken.isNullOrEmpty()
 
@@ -60,5 +69,6 @@ class SecurePrefs(context: Context) {
         private const val KEY_AUTH_TOKEN = "auth_token"
         private const val KEY_PAIRING_CODE = "pairing_code"
         private const val KEY_SCHEDULE_LAST_MODIFIED = "schedule_last_modified"
+        private const val KEY_AUDIO_ENABLED = "audio_enabled"
     }
 }
